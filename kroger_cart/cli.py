@@ -221,10 +221,19 @@ def process_items(
             continue
 
         product = products[0]
-        upc = product["upc"]
-        name = product.get("description", "Unknown")
+        info = api.extract_product_info(product)
+        upc = info["upc"]
+        name = info["name"]
         logger.info(f"  ✓ Found: {name} (UPC: {upc})")
-        found.append({"name": name, "upc": upc, "quantity": quantity, "query": query})
+
+        item_data = {"name": name, "upc": upc, "quantity": quantity, "query": query}
+        if "price" in info:
+            item_data["price"] = info["price"]
+        if "promo_price" in info:
+            item_data["promo_price"] = info["promo_price"]
+        if "in_stock" in info:
+            item_data["in_stock"] = info["in_stock"]
+        found.append(item_data)
 
     # Phase 2: Batch add all found items to cart in a single API call
     if found and not dry_run:
@@ -256,7 +265,8 @@ def print_text_summary(added: list, not_found: list, modality: str, dry_run: boo
     verb = "Would add" if dry_run else "Successfully added"
     print(f"\n✓ {verb} ({len(added)}):")
     for item in added:
-        print(f"  - {item['name']} (x{item['quantity']})")
+        price_str = f" — ${item['price']:.2f}" if item.get("price") else ""
+        print(f"  - {item['name']} (x{item['quantity']}){price_str}")
 
     if not_found:
         print(f"\n✗ Not found or failed ({len(not_found)}):")

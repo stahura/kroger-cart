@@ -249,21 +249,30 @@ class TokenManager:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
+
+        # Start local callback server with dynamic port to avoid conflicts
+        class ReusableTCPServer(HTTPServer):
+            allow_reuse_address = True
+
+        try:
+            server = ReusableTCPServer(("localhost", 0), OAuthCallbackHandler)
+        except OSError:
+            server = ReusableTCPServer(("localhost", 3000), OAuthCallbackHandler)
+
+        actual_port = server.server_address[1]
+        self.redirect_uri = f"http://localhost:{actual_port}"
+        auth_params["redirect_uri"] = self.redirect_uri
+
         auth_url = f"{self.auth_url}?{urlencode(auth_params)}"
 
         logger.info("Opening browser for authentication...")
         logger.info(f"If browser doesn't open, visit:\n{auth_url}\n")
         webbrowser.open(auth_url)
 
-        # Start local callback server
-        class ReusableTCPServer(HTTPServer):
-            allow_reuse_address = True
-
-        server = ReusableTCPServer(("localhost", 3000), OAuthCallbackHandler)
         server.auth_code = None
         server.auth_error = None
 
-        logger.info("Waiting for authentication...")
+        logger.info(f"Waiting for authentication on port {actual_port}...")
         while server.auth_code is None and server.auth_error is None:
             server.handle_request()
 

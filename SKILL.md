@@ -80,8 +80,23 @@ The CLI returns a single JSON object:
   "success": true,
   "dry_run": false,
   "added": [
-    {"name": "Kroger® 2% Reduced Fat Milk", "upc": "0001111041700", "quantity": 1, "query": "whole milk 1 gallon"},
-    {"name": "Kroger® Grade A Large Eggs", "upc": "0001111060932", "quantity": 1, "query": "eggs dozen"}
+    {
+      "name": "Kroger® 2% Reduced Fat Milk",
+      "upc": "0001111041700",
+      "quantity": 1,
+      "query": "whole milk 1 gallon",
+      "price": 3.49,
+      "in_stock": true
+    },
+    {
+      "name": "Kroger® Grade A Large Eggs",
+      "upc": "0001111060932",
+      "quantity": 1,
+      "query": "eggs dozen",
+      "price": 4.99,
+      "promo_price": 3.99,
+      "in_stock": true
+    }
   ],
   "not_found": ["some obscure item"],
   "added_count": 2,
@@ -90,6 +105,11 @@ The CLI returns a single JSON object:
   "modality": "DELIVERY"
 }
 ```
+
+**Key fields for agents:**
+- `price` — Regular price (may be absent if the API doesn't return pricing)
+- `promo_price` — Sale price, only present when the item is on promotion
+- `in_stock` — Whether the item is available at the selected store
 
 ### Step 5: Report results to the user
 
@@ -128,6 +148,16 @@ You can call the CLI again with just the retry items — previously added items 
 | `Token refresh failed` | Run `kroger-cart --auth-only` to re-authenticate |
 | `No Smiths locations found` | Try a different `--zip` code |
 | Exit code 1 with JSON `error` field | Parse the error message from the JSON output |
+
+### Agent-Specific Troubleshooting
+
+**400 Client Errors:** The CLI automatically sanitizes queries (strips `&`, `#`, `@` and other special characters) and retries with a simplified query if the first attempt gets a 400. You generally don't need to worry about this, but if items come back as `not_found`:
+
+- Avoid special characters in queries (`Ben & Jerry's` → `Ben Jerrys`)
+- Keep queries concise — `milk` works better than `organic 2% reduced fat milk 1 gallon half gallon`
+- Don't include units in the query itself — use the `quantity` field instead
+
+**OAuth Port Errors:** The CLI uses a dynamic port for the OAuth callback server, so `Address already in use` errors should not occur. If authentication fails, run `kroger-cart --auth-only` interactively.
 
 ## Example: Full Agent Workflow
 

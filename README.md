@@ -2,7 +2,7 @@
 
 Add grocery items to your Kroger/Smith's cart via the [Kroger Public API](https://developer.kroger.com/).
 
-> **Note:** This tool adds items to your cart — it does not and cannot automate checkout. The Kroger API has no checkout endpoint; you always complete purchases manually in your browser.
+> **Note:** This tool adds items to your cart — it does not and cannot automate checkout. The Kroger API has no checkout endpoint; you always complete purchases manually in your browser or mobile app.
 
 ## Features
 
