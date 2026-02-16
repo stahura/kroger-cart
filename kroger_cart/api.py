@@ -34,11 +34,19 @@ def simplify_query(query: str) -> str:
 
 
 def extract_product_info(product: dict) -> dict:
-    """Extract useful product info including price and stock."""
+    """Extract useful product info including price, deals, and stock.
+
+    Computes savings fields when a promotional price is available:
+    - on_sale (bool): True if a promo price exists and is lower than regular.
+    - promo_price (float): The promotional price.
+    - savings (float): Dollar amount saved (regular - promo).
+    - savings_pct (int): Percentage saved, rounded to nearest integer.
+    """
     info = {
         "upc": product["upc"],
         "name": product.get("description", "Unknown"),
         "brand": product.get("brand", ""),
+        "on_sale": False,
     }
 
     # Extract price from items array
@@ -47,9 +55,26 @@ def extract_product_info(product: dict) -> dict:
         item = items[0]
         price_info = item.get("price", {})
         if price_info:
-            info["price"] = price_info.get("regular", price_info.get("promo"))
-            if price_info.get("promo"):
-                info["promo_price"] = price_info["promo"]
+            regular = price_info.get("regular")
+            promo = price_info.get("promo")
+            info["price"] = regular or promo
+            if promo and regular and promo < regular:
+                info["promo_price"] = promo
+                info["savings"] = round(regular - promo, 2)
+                info["savings_pct"] = round((regular - promo) / regular * 100)
+                info["on_sale"] = True
+            elif promo:
+                # Promo exists but isn't lower (edge case)
+                info["promo_price"] = promo
+
+        # National pricing (for reference/comparison)
+        national = item.get("nationalPrice", {})
+        if national:
+            if national.get("regular"):
+                info["national_price"] = national["regular"]
+            if national.get("promo"):
+                info["national_promo"] = national["promo"]
+
         fulfillment = item.get("fulfillment", {})
         info["in_stock"] = fulfillment.get("inStock", True)
 

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kroger_cart.api import find_location, search_product, add_to_cart
+from kroger_cart.api import find_location, search_product, add_to_cart, extract_product_info
 
 
 class TestFindLocation:
@@ -97,3 +97,69 @@ class TestAddToCart:
 
         result = add_to_cart(session, "token", "https://api.kroger.com/v1", "001111", 2, "PICKUP")
         assert result == {"status": "ok"}
+
+
+class TestExtractProductInfo:
+    """Test product info extraction with deal/promo fields."""
+
+    def test_with_promo_price(self):
+        product = {
+            "upc": "001111",
+            "description": "Kroger Milk",
+            "brand": "Kroger",
+            "items": [{
+                "price": {"regular": 3.99, "promo": 2.99},
+                "fulfillment": {"inStock": True},
+            }],
+        }
+        info = extract_product_info(product)
+        assert info["on_sale"] is True
+        assert info["price"] == 3.99
+        assert info["promo_price"] == 2.99
+        assert info["savings"] == 1.0
+        assert info["savings_pct"] == 25
+        assert info["in_stock"] is True
+
+    def test_without_promo(self):
+        product = {
+            "upc": "002222",
+            "description": "Eggs",
+            "brand": "Store",
+            "items": [{
+                "price": {"regular": 2.79},
+                "fulfillment": {"inStock": True},
+            }],
+        }
+        info = extract_product_info(product)
+        assert info["on_sale"] is False
+        assert info["price"] == 2.79
+        assert "promo_price" not in info
+        assert "savings" not in info
+
+    def test_with_national_pricing(self):
+        product = {
+            "upc": "003333",
+            "description": "Bread",
+            "brand": "Wonder",
+            "items": [{
+                "price": {"regular": 3.29, "promo": 2.50},
+                "nationalPrice": {"regular": 3.49, "promo": 2.99},
+                "fulfillment": {"inStock": True},
+            }],
+        }
+        info = extract_product_info(product)
+        assert info["on_sale"] is True
+        assert info["national_price"] == 3.49
+        assert info["national_promo"] == 2.99
+        assert info["savings"] == 0.79
+        assert info["savings_pct"] == 24
+
+    def test_no_items_array(self):
+        product = {
+            "upc": "004444",
+            "description": "Mystery Item",
+        }
+        info = extract_product_info(product)
+        assert info["on_sale"] is False
+        assert "price" not in info
+

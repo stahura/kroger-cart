@@ -40,6 +40,7 @@ Examples:
   %(prog)s groceries.csv
   %(prog)s --items "butter" --zip 84045 --modality PICKUP
   %(prog)s --items "cheese" --dry-run
+  %(prog)s --deals --items "milk" "eggs" "bread"
         """,
     )
 
@@ -102,6 +103,11 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Search for products but do not add them to the cart.",
+    )
+    parser.add_argument(
+        "--deals",
+        action="store_true",
+        help="Check deals/promotions for items (implies --dry-run).",
     )
     parser.add_argument(
         "--token-storage",
@@ -231,6 +237,12 @@ def process_items(
             item_data["price"] = info["price"]
         if "promo_price" in info:
             item_data["promo_price"] = info["promo_price"]
+        if info.get("on_sale"):
+            item_data["on_sale"] = True
+            item_data["savings"] = info.get("savings", 0)
+            item_data["savings_pct"] = info.get("savings_pct", 0)
+        else:
+            item_data["on_sale"] = False
         if "in_stock" in info:
             item_data["in_stock"] = info["in_stock"]
         found.append(item_data)
@@ -255,40 +267,84 @@ def process_items(
 # ─── Output ──────────────────────────────────────────────────────────────────
 
 
-def print_text_summary(added: list, not_found: list, modality: str, dry_run: bool):
+def _format_price_str(item: dict) -> str:
+    """Format price string with promo pricing and savings."""
+    if not item.get("price"):
+        return ""
+    if item.get("on_sale") and item.get("promo_price"):
+        savings = item.get("savings", 0)
+        pct = item.get("savings_pct", 0)
+        hot = " 🔥" if pct >= 20 else ""
+        return (
+            f" — ${item['price']:.2f} → ${item['promo_price']:.2f}"
+            f" (SAVE ${savings:.2f}, {pct}%){hot}"
+        )
+    return f" — ${item['price']:.2f}"
+
+
+def _deal_summary(added: list) -> str | None:
+    """Return a total-savings summary line, or None if no deals."""
+    deals = [i for i in added if i.get("on_sale")]
+    if not deals:
+        return None
+    total = sum(i.get("savings", 0) * i.get("quantity", 1) for i in deals)
+    return f"💰 {len(deals)} item(s) on sale — total savings: ${total:.2f}"
+
+
+def print_text_summary(
+    added: list, not_found: list, modality: str, dry_run: bool, deals_mode: bool = False,
+):
     """Print human-readable summary."""
     print("\n" + "=" * 50)
-    label = "SUMMARY (DRY RUN)" if dry_run else "SUMMARY"
+    if deals_mode:
+        label = "DEALS CHECK"
+    elif dry_run:
+        label = "SUMMARY (DRY RUN)"
+    else:
+        label = "SUMMARY"
     print(label)
     print("=" * 50)
 
-    verb = "Would add" if dry_run else "Successfully added"
+    verb = "Deals found for" if deals_mode else ("Would add" if dry_run else "Successfully added")
     print(f"\n✓ {verb} ({len(added)}):")
     for item in added:
-        price_str = f" — ${item['price']:.2f}" if item.get("price") else ""
-        print(f"  - {item['name']} (x{item['quantity']}){price_str}")
+        print(f"  - {item['name']} (x{item['quantity']}){_format_price_str(item)}")
 
     if not_found:
         print(f"\n✗ Not found or failed ({len(not_found)}):")
         for item in not_found:
             print(f"  - {item}")
 
-    if not dry_run:
+    deal_line = _deal_summary(added)
+    if deal_line:
+        print(f"\n{deal_line}")
+
+    if deals_mode or dry_run:
+        if deals_mode:
+            print(f"\n🔍 Deals check complete — no items were added to cart.")
+        else:
+            print(f"\n🔍 Dry run complete — no items were added to cart.")
+    else:
         print(f"\n🛒 View your cart: https://www.smithsfoodanddrug.com/cart")
         print("   (Complete checkout manually in your browser)")
-    else:
-        print(f"\n🔍 Dry run complete — no items were added to cart.")
 
 
-def print_json_result(added: list, not_found: list, modality: str, dry_run: bool):
+def print_json_result(
+    added: list, not_found: list, modality: str, dry_run: bool, deals_mode: bool = False,
+):
     """Print machine-readable JSON result."""
+    deals = [i for i in added if i.get("on_sale")]
+    total_savings = sum(i.get("savings", 0) * i.get("quantity", 1) for i in deals)
     result = {
         "success": True,
         "dry_run": dry_run,
+        "deals_mode": deals_mode,
         "added": added,
         "not_found": not_found,
         "added_count": len(added),
         "not_found_count": len(not_found),
+        "deals_count": len(deals),
+        "total_savings": round(total_savings, 2),
         "cart_url": "https://www.smithsfoodanddrug.com/cart",
         "modality": modality,
     }
@@ -357,6 +413,10 @@ def main(argv=None):
             print(json.dumps({"success": False, "error": "No items provided."}))
         sys.exit(1)
 
+    # --deals implies --dry-run
+    deals_mode = args.deals
+    dry_run = args.dry_run or deals_mode
+
     try:
         access_token = token_mgr.get_access_token()
         added, not_found, location_id = process_items(
@@ -366,13 +426,13 @@ def main(argv=None):
             items=items,
             zip_code=args.zip,
             modality=args.modality,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
         )
 
         if json_mode:
-            print_json_result(added, not_found, args.modality, args.dry_run)
+            print_json_result(added, not_found, args.modality, dry_run, deals_mode)
         else:
-            print_text_summary(added, not_found, args.modality, args.dry_run)
+            print_text_summary(added, not_found, args.modality, dry_run, deals_mode)
 
     except Exception as e:
         if json_mode:

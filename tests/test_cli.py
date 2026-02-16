@@ -53,8 +53,13 @@ class TestParseArgs:
         assert args.output == "text"
         assert args.modality == "DELIVERY"
         assert args.dry_run is False
+        assert args.deals is False
         assert args.auth_only is False
         assert args.token_storage == "auto"
+
+    def test_deals_flag(self):
+        args = parse_args(["--items", "milk", "--deals"])
+        assert args.deals is True
 
 
 class TestLoadItems:

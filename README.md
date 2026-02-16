@@ -7,7 +7,8 @@ Add grocery items to your Kroger/Smith's cart via the [Kroger Public API](https:
 ## Features
 
 - 🛒 Search and add items to your cart for **delivery** or **pickup**
-- 📄 Multiple input methods: CLI flags, JSON, CSV, or stdin
+- � `--deals` mode to check promotions and savings
+- �📄 Multiple input methods: CLI flags, JSON, CSV, or stdin
 - 🔐 OAuth2 + PKCE authentication with automatic token refresh
 - 🔑 Optional OS keychain storage (`pip install kroger-cart[keyring]`)
 - 🔄 Automatic retry with exponential backoff on transient errors
@@ -37,22 +38,26 @@ pip install -e .
 pip install -e ".[keyring]"
 ```
 
-### 2. Configure
+### 2. Create App
+1. Go to [developer.kroger.com](https://developer.kroger.com/) and sign in.
+2. Create a new application to get your `CLIENT_ID` and `CLIENT_SECRET`.
 
+### 3. Configure
 ```bash
 cp .env.example .env
-# Edit .env with your Kroger API credentials from https://developer.kroger.com/
+# Add your CLIENT_ID and CLIENT_SECRET to .env
 ```
 
-### 3. Authenticate
+### 4. Link Shopper Account
+Run this command to log in with the Kroger account you want to shop with:
 
 ```bash
 kroger-cart --auth-only
 ```
+This opens a web browser. Sign in and click "Authorize" to give the CLI access to your cart.
 
-Opens a browser for Kroger login. Tokens auto-refresh for ~30 days.
 
-### 4. Add Items
+### 5. Add Items
 
 ```bash
 kroger-cart --items "milk 1 gallon" "eggs dozen" "bread"
@@ -89,6 +94,22 @@ CSV format:
 query,quantity
 milk 1 gallon,2
 eggs dozen,1
+```
+
+### Check deals
+
+```bash
+kroger-cart --deals --items "milk" "eggs" "bread"
+```
+
+Shows promo pricing and savings inline:
+```
+✓ Deals found for (3):
+  - Kroger 2% Milk (x1) — $3.49 → $2.99 (SAVE $0.50, 14%)
+  - Large Eggs (x1) — $2.79
+  - Bread (x1) — $3.29 → $2.50 (SAVE $0.79, 24%) 🔥
+
+💰 2 item(s) on sale — total savings: $1.29
 ```
 
 ### Dry run (preview only)
@@ -152,6 +173,7 @@ This separation keeps the CLI simple, testable, and usable by both humans and AI
 | `--env PROD\|CERT` | `PROD` | Kroger API environment |
 | `--auth-only` | — | Run authentication only |
 | `--dry-run` | — | Search but don't add to cart |
+| `--deals` | — | Check deals/promotions (implies `--dry-run`) |
 | `--token-storage auto\|file\|keyring` | `auto` | Token storage backend |
 
 ## Project Structure
