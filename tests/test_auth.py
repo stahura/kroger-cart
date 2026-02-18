@@ -132,3 +132,17 @@ class TestTokenManager:
         result = mgr.get_access_token()
         assert result == "new-token"
         mgr.session.post.assert_called_once()
+
+    def test_no_tokens_triggers_auth(self, tmp_path):
+        """When no stored tokens exist, should attempt authentication."""
+        mgr = self._make_manager(tmp_path)  # No pre-loaded tokens
+        # Mock _authenticate to avoid opening a browser
+        mgr._authenticate = MagicMock(return_value={
+            "access_token": "fresh-token",
+            "refresh_token": "fresh-ref",
+            "expires_in": 1800,
+        })
+        result = mgr.get_access_token()
+        # get_access_token returns _authenticate()'s return value directly
+        assert result["access_token"] == "fresh-token"
+        mgr._authenticate.assert_called_once()

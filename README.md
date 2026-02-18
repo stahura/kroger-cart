@@ -32,23 +32,25 @@ kroger-cart --json '[{"query": "milk", "quantity": 2}, {"query": "eggs"}]' --out
 ### 1. Install
 
 ```bash
+pip install kroger-cart
+
+# Or install from source:
 pip install -e .
 
 # Optional: enable OS keychain for token storage
-pip install -e ".[keyring]"
+pip install kroger-cart[keyring]
 ```
 
-### 2. Create App
-1. Go to [developer.kroger.com](https://developer.kroger.com/) and sign in.
-2. Create a new application to get your `CLIENT_ID` and `CLIENT_SECRET`.
-
-### 3. Configure
+### 2. Configure
+1. Go to [developer.kroger.com](https://developer.kroger.com/) and create an application.
+2. Use a **Production** app (`KROGER_ENV=PROD`) for real Kroger/Smith's shopper accounts.
+3. In your Kroger app settings, set Redirect URI (default: `http://localhost:3000`).
+4. Run the setup wizard and enter the same values:
 ```bash
-cp .env.example .env
-# Add your CLIENT_ID and CLIENT_SECRET to .env
+kroger-cart --setup
 ```
-
-### 4. Link Shopper Account
+This saves your credentials/config to `~/.config/kroger-cart/.env` (`KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET`, `KROGER_ENV`, `KROGER_REDIRECT_URI`).
+### 3. Link Shopper Account
 Run this command to log in with the Kroger account you want to shop with:
 
 ```bash
@@ -56,8 +58,7 @@ kroger-cart --auth-only
 ```
 This opens a web browser. Sign in and click "Authorize" to give the CLI access to your cart.
 
-
-### 5. Add Items
+### 4. Add Items
 
 ```bash
 kroger-cart --items "milk 1 gallon" "eggs dozen" "bread"
@@ -118,6 +119,12 @@ Shows promo pricing and savings inline:
 kroger-cart --items "steak" --dry-run
 ```
 
+### Cart status note
+
+Cart retrieval ("get cart" / list current cart contents) is not available to general developers via Kroger Public API access. It is available only with Partner API access.
+
+For public usage of this CLI, review cart contents in the Kroger/Smith's web or mobile app after adding items.
+
 ### Machine-readable output
 
 ```bash
@@ -174,7 +181,9 @@ This separation keeps the CLI simple, testable, and usable by both humans and AI
 | `--auth-only` | — | Run authentication only |
 | `--dry-run` | — | Search but don't add to cart |
 | `--deals` | — | Check deals/promotions (implies `--dry-run`) |
+| `--setup` | — | Interactive setup: configure API credentials |
 | `--token-storage auto\|file\|keyring` | `auto` | Token storage backend |
+| `--version` | — | Show version and exit |
 
 ## Project Structure
 
@@ -190,20 +199,33 @@ kroger-cart/
 ├── tests/                 # Pytest test suite
 ├── pyproject.toml         # Package config
 ├── .env.example           # Credentials template
-└── smiths_cart.py         # Backward-compatible entry point
+└── LICENSE                # MIT license
 ```
 
-## Token Storage
+## Configuration & Token Storage
+
+All configuration is stored in `~/.config/kroger-cart/`:
+
+| File | Purpose |
+|------|---------|
+| `.env` | API credentials + auth config (`KROGER_CLIENT_ID`, `KROGER_CLIENT_SECRET`, `KROGER_ENV`, `KROGER_REDIRECT_URI`) |
+| `tokens.json` | OAuth tokens (auto-managed, chmod 600) |
+
+Run `kroger-cart --setup` to create the config directory and save your credentials.
+
+OAuth redirect behavior:
+- Default callback URI is `http://localhost:3000`
+- If you use a different redirect URI in Kroger Developer Portal, set `KROGER_REDIRECT_URI` to the exact same value in `~/.config/kroger-cart/.env`
+- Redirect URI must match exactly between your app settings and the CLI config
 
 By default, tokens are stored in `tokens.json` with restricted file permissions (chmod 600 on Unix).
-
 For enhanced security, install the keyring extra:
 
 ```bash
 pip install kroger-cart[keyring]
 ```
 
-This uses your OS keychain (macOS Keychain, GNOME Keyring, Windows Credential Locker). If no keychain is available (e.g., headless Linux), it falls back to file storage automatically.
+This uses your OS keychain (macOS Keychain, GNOME Keyring, Windows Credential Locker). Falls back to file storage automatically on headless systems.
 
 You can force a specific backend:
 

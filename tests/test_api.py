@@ -163,3 +163,130 @@ class TestExtractProductInfo:
         assert info["on_sale"] is False
         assert "price" not in info
 
+
+class TestGetCart:
+    """Test cart retrieval."""
+
+    def test_returns_cart_items(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.content = b'{"data": [{"upc": "001111", "quantity": 2}]}'
+        response.json.return_value = {"data": [{"upc": "001111", "quantity": 2}]}
+        response.raise_for_status = MagicMock()
+        session.get.return_value = response
+
+        from kroger_cart.api import get_cart
+        result = get_cart(session, "token", "https://api.kroger.com/v1")
+        assert len(result) == 1
+        assert result[0]["upc"] == "001111"
+
+    def test_returns_empty_on_204(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 204
+        response.content = b""
+        response.raise_for_status = MagicMock()
+        session.get.return_value = response
+
+        from kroger_cart.api import get_cart
+        result = get_cart(session, "token", "https://api.kroger.com/v1")
+        assert result == []
+
+    def test_raises_on_401(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 401
+        session.get.return_value = response
+
+        from kroger_cart.api import get_cart
+        with pytest.raises(Exception, match="Authentication expired"):
+            get_cart(session, "token", "https://api.kroger.com/v1")
+
+
+class TestAddToCartBatch:
+    """Test batch cart addition."""
+
+    def test_handles_204_no_content(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.content = b""
+        response.status_code = 204
+        response.raise_for_status = MagicMock()
+        session.put.return_value = response
+
+        from kroger_cart.api import add_to_cart_batch
+        result = add_to_cart_batch(
+            session, "token", "https://api.kroger.com/v1",
+            [{"upc": "001111", "quantity": 1}, {"upc": "002222", "quantity": 2}],
+        )
+        assert result["status"] == 204
+
+        # Verify correct payload structure
+        call_args = session.put.call_args
+        payload = call_args.kwargs.get("json") or call_args[1].get("json")
+        assert len(payload["items"]) == 2
+
+    def test_raises_on_401(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 401
+        session.put.return_value = response
+
+        from kroger_cart.api import add_to_cart_batch
+        with pytest.raises(Exception, match="Authentication expired"):
+            add_to_cart_batch(
+                session, "token", "https://api.kroger.com/v1",
+                [{"upc": "001111"}],
+            )
+
+
+class TestSanitizeQuery:
+    """Test query sanitization."""
+
+    def test_removes_special_characters(self):
+        from kroger_cart.api import sanitize_query
+        assert sanitize_query("M&M's candy") == "M M s candy"
+
+    def test_collapses_whitespace(self):
+        from kroger_cart.api import sanitize_query
+        assert sanitize_query("  too   many   spaces  ") == "too many spaces"
+
+    def test_keeps_periods(self):
+        from kroger_cart.api import sanitize_query
+        assert sanitize_query("Dr. Pepper") == "Dr. Pepper"
+
+
+class TestSimplifyQuery:
+    """Test query simplification."""
+
+    def test_removes_size_descriptors(self):
+        from kroger_cart.api import simplify_query
+        result = simplify_query("milk 1 gallon")
+        assert "gallon" not in result.lower()
+        assert "milk" in result.lower()
+
+    def test_removes_ounce_counts(self):
+        from kroger_cart.api import simplify_query
+        result = simplify_query("yogurt 32 oz")
+        assert "oz" not in result.lower()
+        assert "yogurt" in result.lower()
+
+    def test_preserves_core_terms(self):
+        from kroger_cart.api import simplify_query
+        assert simplify_query("whole wheat bread") == "whole wheat bread"
+
+
+class TestSearchProduct401:
+    """Test that search_product raises on 401."""
+
+    def test_raises_on_401(self):
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 401
+        session.get.return_value = response
+
+        with pytest.raises(Exception, match="Authentication expired"):
+            search_product(session, "token", "https://api.kroger.com/v1", "milk", "loc1")
+
+

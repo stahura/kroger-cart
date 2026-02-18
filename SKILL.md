@@ -10,9 +10,76 @@ Add items to a Kroger-family grocery cart using the `kroger-cart` CLI. This skil
 ## Prerequisites
 
 - Python 3.10+
-- The CLI installed (`pip install .` from the repo root)
-- A `.env` file with your Kroger API credentials (see `.env.example`)
+- The CLI installed (prefer PyPI: `pip install kroger-cart`)
+- Kroger Developer API credentials (`KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET`)
+- Redirect URI configured in Kroger Developer Portal (default used by CLI: `http://localhost:3000`)
 - OAuth tokens (run `kroger-cart --auth-only` once to authenticate via browser; tokens auto-refresh for ~30 days)
+
+## Agent Setup Policy (Required)
+
+Before running auth, the agent must explicitly guide the user through Kroger app setup:
+
+1. Go to `https://developer.kroger.com` and create/select a Kroger app.
+2. Confirm the user wants **Production** access for real shopper carts (`KROGER_ENV=PROD`).
+3. Ask which localhost callback URI the user registered (default/common choice: `http://localhost:3000`, but any localhost port is valid if configured in Kroger).
+4. Ensure the same exact URI is used in both places:
+   - Kroger Developer Portal Redirect URI
+   - CLI config (`KROGER_REDIRECT_URI`)
+5. Prefer secure setup: have the user place credentials in `~/.config/kroger-cart/.env` rather than sending secrets in chat.
+6. If the platform can only proceed by receiving secrets in chat, warn the user first that sharing secrets in chat is generally less secure, then request only what is required.
+
+If these do not match exactly, OAuth will fail with `redirect_uri did not match`.
+
+## Installation
+
+Use these commands in order, based on context:
+
+1. **Normal usage (recommended): install from PyPI**
+```bash
+pip install kroger-cart
+```
+
+2. **Optional secure token storage via OS keychain**
+```bash
+pip install kroger-cart[keyring]
+```
+
+3. **First-time account bootstrap**
+```bash
+kroger-cart --setup
+kroger-cart --auth-only
+```
+
+Preferred credential/config file location:
+```bash
+~/.config/kroger-cart/.env
+```
+
+Minimum required keys:
+```bash
+KROGER_CLIENT_ID=your_client_id
+KROGER_CLIENT_SECRET=your_client_secret
+KROGER_ENV=PROD
+KROGER_REDIRECT_URI=http://localhost:3000
+```
+
+If your app uses a non-default localhost callback port, set the exact URI in the config env file (replace with the user-selected port):
+```bash
+echo 'KROGER_REDIRECT_URI=http://localhost:4545' >> ~/.config/kroger-cart/.env
+```
+The value must exactly match the Redirect URI in Kroger Developer Portal.
+
+4. **Verify CLI is available**
+```bash
+kroger-cart --version
+```
+
+5. **Local development in this repo only (not normal agent usage): editable install**
+```bash
+pip install -e .
+```
+
+If `kroger-cart` is not found after install, ensure the current Python environment's scripts/bin directory is on `PATH` and rerun the install in the active environment.
 
 ## How to Use
 
@@ -46,22 +113,27 @@ Format items as a JSON array with `query` and `quantity` fields:
 ### Step 3: Run the CLI
 
 **Always use `--output json`** so you can parse the results programmatically.
+For unattended/agent workflows, prefer `--token-storage file` unless keyring is explicitly configured.
 
 ```bash
-kroger-cart --output json --json '<the JSON array from Step 2>'
+kroger-cart --output json --token-storage file --json '<the JSON array from Step 2>'
 ```
 
 **With `--items`** (simpler, when all quantities are 1):
 
 ```bash
-kroger-cart --output json --items "whole milk 1 gallon" "eggs dozen" "bread loaf"
+kroger-cart --output json --token-storage file --items "whole milk 1 gallon" "eggs dozen" "bread loaf"
 ```
 
 **Piped from another tool via stdin:**
 
 ```bash
-echo '<JSON array>' | kroger-cart --output json --stdin
+echo '<JSON array>' | kroger-cart --output json --token-storage file --stdin
 ```
+
+**Cart status note:**
+
+Do not attempt "get cart" with this public-access workflow. Cart retrieval is only available with Kroger Partner API access and is not part of the standard public developer flow.
 
 **Optional flags:**
 
@@ -119,6 +191,33 @@ Tell the user:
 - 🛒 Provide the cart URL for checkout: https://www.smithsfoodanddrug.com/cart
 - Remind the user that checkout must be completed manually in their browser
 
+## Agent Execution Contract (Recommended)
+
+Use this contract whenever an agent automates `kroger-cart`:
+
+1. **Default command shape**
+```bash
+kroger-cart --output json --token-storage file --json '<array of {query, quantity}>'
+```
+
+2. **Success criteria**
+- Process as success only when the command exits with code `0` **and** JSON contains `"success": true`.
+- If `not_found_count > 0`, report partial success and include retry suggestions.
+
+3. **Failure criteria**
+- Treat non-zero exit code as failure.
+- Treat JSON with `"success": false` as failure, even if exit code is `0`.
+- Read and surface the JSON `error` field to the user or orchestrator.
+
+4. **Retry policy**
+- On transient network/API errors, retry once.
+- On `not_found`, rephrase only the missing queries and retry only those items.
+- Do not re-add already successful items unless explicitly requested.
+
+5. **Safe modes**
+- Use `--dry-run --output json` to preview matches before modifying the cart.
+- For cart status, direct users to the Kroger/Smith's app or website unless Partner API access is explicitly available.
+
 ## Handling Not-Found Items
 
 If items come back in `not_found`, try rephrasing and running a second pass:
@@ -157,7 +256,9 @@ You can call the CLI again with just the retry items — previously added items 
 - Keep queries concise — `milk` works better than `organic 2% reduced fat milk 1 gallon half gallon`
 - Don't include units in the query itself — use the `quantity` field instead
 
-**OAuth Port Errors:** The CLI uses a dynamic port for the OAuth callback server, so `Address already in use` errors should not occur. If authentication fails, run `kroger-cart --auth-only` interactively.
+**OAuth Redirect URI Errors:** The CLI uses a fixed configured redirect URI (default/common `http://localhost:3000`, but any localhost port is fine if registered). If you see `redirect_uri did not match`, ensure the same exact URI is set in both places:
+- Kroger Developer Portal app Redirect URI
+- `KROGER_REDIRECT_URI` in `~/.config/kroger-cart/.env` (or leave it unset to use default `http://localhost:3000`)
 
 ## Example: Full Agent Workflow
 

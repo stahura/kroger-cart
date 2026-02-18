@@ -106,3 +106,35 @@ class TestLoadCSV:
         csv_file.write_text("query\nmilk\n")
         items = load_items_from_csv(str(csv_file))
         assert items[0]["quantity"] == 1
+
+
+class TestParseArgsExtended:
+    """Test new CLI flags."""
+
+    def test_cart_flag(self):
+        args = parse_args(["--cart"])
+        assert args.cart is True
+
+    def test_defaults_include_cart(self):
+        args = parse_args(["--items", "milk"])
+        assert args.cart is False
+
+
+class TestLoadItemsValidation:
+    """Test JSON input validation."""
+
+    def test_invalid_json_raises(self):
+        args = parse_args(["--json", "not json at all"])
+        with pytest.raises(ValueError, match="Invalid JSON"):
+            load_items(args)
+
+    def test_json_non_array_raises(self):
+        args = parse_args(["--json", '{"query": "milk"}'])
+        with pytest.raises(ValueError, match="JSON array"):
+            load_items(args)
+
+    def test_json_sets_default_quantity(self):
+        args = parse_args(["--json", '[{"query": "milk"}]'])
+        items = load_items(args)
+        assert items[0]["quantity"] == 1
+

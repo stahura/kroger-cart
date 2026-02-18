@@ -4,15 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kroger-cart"
-version = "1.0.0"
+version = "1.1.3"
 description = "CLI to add grocery items to your Kroger/Smith's cart via the Kroger API"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+authors = [{name = "stahura"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
 dependencies = [
     "requests>=2.28",
     "python-dotenv>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/stahura/kroger-cart"
+Repository = "https://github.com/stahura/kroger-cart"
 
 [project.scripts]
 kroger-cart = "kroger_cart.cli:main"

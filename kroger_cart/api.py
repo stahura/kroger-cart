@@ -167,6 +167,11 @@ def search_product(
             logger.debug(f"  Query '{attempt}' got 400, trying simpler query...")
             continue
 
+        if response.status_code == 401:
+            raise Exception(
+                "Authentication expired. Run `kroger-cart --auth-only` to re-authenticate."
+            )
+
         response.raise_for_status()
         data = response.json()
         results = data.get("data", [])
@@ -249,8 +254,46 @@ def add_to_cart_batch(
         headers={**get_headers(access_token), "Content-Type": "application/json"},
         json=payload,
     )
+
+    if response.status_code == 401:
+        raise Exception(
+            "Authentication expired. Run `kroger-cart --auth-only` to re-authenticate."
+        )
+
     response.raise_for_status()
 
     if response.content:
         return response.json()
     return {"status": response.status_code}
+
+
+def get_cart(
+    session: Session,
+    access_token: str,
+    api_base: str,
+) -> list[dict]:
+    """Retrieve the current cart contents.
+
+    Args:
+        session: HTTP session.
+        access_token: OAuth access token.
+        api_base: Kroger API base URL.
+
+    Returns:
+        List of cart item dicts, or empty list if cart is empty.
+    """
+    url = f"{api_base}/cart"
+    response = session.get(url, headers=get_headers(access_token))
+
+    if response.status_code == 401:
+        raise Exception(
+            "Authentication expired. Run `kroger-cart --auth-only` to re-authenticate."
+        )
+
+    response.raise_for_status()
+
+    if not response.content:
+        return []
+
+    data = response.json()
+    return data.get("data", [])

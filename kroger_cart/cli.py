@@ -9,9 +9,12 @@ import json
 import csv
 import logging
 import argparse
+import requests
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from kroger_cart import __version__
 from kroger_cart.session import create_session
 from kroger_cart.auth import TokenManager, get_storage_backend
 from kroger_cart import api
@@ -41,7 +44,14 @@ Examples:
   %(prog)s --items "butter" --zip 84045 --modality PICKUP
   %(prog)s --items "cheese" --dry-run
   %(prog)s --deals --items "milk" "eggs" "bread"
+  %(prog)s --cart
         """,
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     # Input methods (mutually exclusive)
@@ -115,8 +125,88 @@ Examples:
         default="auto",
         help="Token storage backend (default: auto-detect).",
     )
+    parser.add_argument(
+        "--cart",
+        action="store_true",
+        help="Show current cart contents and exit.",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Interactive setup: configure API credentials.",
+    )
 
     return parser.parse_args(argv)
+
+
+# ─── Config Directory ────────────────────────────────────────────────────────
+
+
+def get_config_dir() -> str:
+    """Get the configuration directory path.
+
+    Uses ~/.config/kroger-cart/ on all platforms.
+    Creates the directory if it doesn't exist.
+    """
+    config_dir = os.path.join(os.path.expanduser("~"), ".config", "kroger-cart")
+    os.makedirs(config_dir, exist_ok=True)
+    return config_dir
+
+
+def run_setup():
+    """Interactive setup: create config directory and write credentials."""
+    config_dir = get_config_dir()
+    env_path = os.path.join(config_dir, ".env")
+
+    print("\n🔧 Kroger Cart Setup")
+    print("=" * 40)
+    print(f"Config directory: {config_dir}")
+    print()
+
+    if os.path.exists(env_path):
+        print(f"⚠️  Config file already exists: {env_path}")
+        overwrite = input("  Overwrite? [y/N]: ").strip().lower()
+        if overwrite != "y":
+            print("Setup cancelled.")
+            return
+
+    print("Get your credentials from https://developer.kroger.com/")
+    print("Use a Production app for real shopper accounts (KROGER_ENV=PROD).")
+    print()
+    client_id = input("  Client ID: ").strip()
+    client_secret = input("  Client Secret: ").strip()
+    env_input = input("  Environment [PROD/CERT] (default: PROD): ").strip().upper()
+    kroger_env = env_input if env_input in {"PROD", "CERT"} else "PROD"
+    redirect_input = input(
+        "  Redirect URI (default: http://localhost:3000): "
+    ).strip()
+    redirect_uri = redirect_input or "http://localhost:3000"
+
+    if not client_id or not client_secret:
+        print("\n❌ Both Client ID and Client Secret are required.")
+        sys.exit(1)
+    parsed_redirect = urlparse(redirect_uri)
+    if not parsed_redirect.scheme or not parsed_redirect.hostname or parsed_redirect.port is None:
+        print(
+            "\n❌ Redirect URI must include scheme, host, and port "
+            "(example: http://localhost:3000)."
+        )
+        sys.exit(1)
+
+    with open(env_path, "w") as f:
+        f.write(f"KROGER_CLIENT_ID={client_id}\n")
+        f.write(f"KROGER_CLIENT_SECRET={client_secret}\n")
+        f.write(f"KROGER_ENV={kroger_env}\n")
+        f.write(f"KROGER_REDIRECT_URI={redirect_uri}\n")
+
+    # Restrict permissions (Unix only)
+    try:
+        os.chmod(env_path, 0o600)
+    except OSError:
+        pass
+
+    print(f"\n✅ Credentials saved to {env_path}")
+    print("\nNext step: run `kroger-cart --auth-only` to link your shopper account.")
 
 
 # ─── Logging Setup ───────────────────────────────────────────────────────────
@@ -163,14 +253,29 @@ def load_items_from_csv(filename: str) -> list[dict]:
 def load_items(args) -> list[dict]:
     """Load items from whichever input method was specified."""
     if args.items:
-        return [{"query": item, "quantity": 1} for item in args.items]
+        return [{"query": name, "quantity": 1} for name in args.items]
 
     if args.json_input:
-        return json.loads(args.json_input)
+        try:
+            items = json.loads(args.json_input)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in --json: {e}") from e
+        if not isinstance(items, list):
+            raise ValueError("--json must be a JSON array, e.g. '[{\"query\": \"milk\"}]'")
+        for item in items:
+            item.setdefault("quantity", 1)
+        return items
 
     if args.stdin:
-        raw = sys.stdin.read().strip()
-        return json.loads(raw)
+        try:
+            items = json.loads(sys.stdin.read())
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON from stdin: {e}") from e
+        if not isinstance(items, list):
+            raise ValueError("stdin must contain a JSON array")
+        for item in items:
+            item.setdefault("quantity", 1)
+        return items
 
     if args.csv_file:
         return load_items_from_csv(args.csv_file)
@@ -351,6 +456,36 @@ def print_json_result(
     print(json.dumps(result, indent=2))
 
 
+def print_cart_text(cart_items: list):
+    """Print human-readable cart contents."""
+    print("\n" + "=" * 50)
+    print("CURRENT CART")
+    print("=" * 50)
+
+    if not cart_items:
+        print("\n🛒 Your cart is empty.")
+        return
+
+    print(f"\n🛒 {len(cart_items)} item(s) in cart:")
+    for item in cart_items:
+        upc = item.get("upc", "?")
+        qty = item.get("quantity", 1)
+        print(f"  - UPC {upc} (x{qty})")
+
+    print(f"\n🔗 https://www.smithsfoodanddrug.com/cart")
+
+
+def print_cart_json(cart_items: list):
+    """Print machine-readable cart contents."""
+    print(json.dumps({
+        "success": True,
+        "cart_items": cart_items,
+        "item_count": len(cart_items),
+        "cart_url": "https://www.smithsfoodanddrug.com/cart",
+    }, indent=2))
+
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 
@@ -358,29 +493,39 @@ def build_config(args) -> dict:
     """Build configuration dict from environment and CLI args."""
     env = args.env
     base_domain = "api-ce.kroger.com" if env == "CERT" else "api.kroger.com"
+    config_dir = get_config_dir()
 
     return {
         "client_id": os.environ.get("KROGER_CLIENT_ID", ""),
         "client_secret": os.environ.get("KROGER_CLIENT_SECRET", ""),
-        "redirect_uri": "http://localhost:3000",
+        "redirect_uri": os.environ.get("KROGER_REDIRECT_URI", "http://localhost:3000"),
         "auth_url": f"https://{base_domain}/v1/connect/oauth2/authorize",
         "token_url": f"https://{base_domain}/v1/connect/oauth2/token",
         "api_base": f"https://{base_domain}/v1",
-        "token_file": os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tokens.json"
-        ),
+        "token_file": os.path.join(config_dir, "tokens.json"),
     }
 
 
 def main(argv=None):
     """Main entry point."""
-    # Load .env from the project directory
+    # Load .env from config directory first, then fall back to project directory
+    config_dir = get_config_dir()
+    config_env = os.path.join(config_dir, ".env")
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    load_dotenv(os.path.join(project_dir, ".env"))
+    project_env = os.path.join(project_dir, ".env")
+
+    # Config dir takes priority; project dir is fallback for backward compat
+    load_dotenv(config_env)
+    load_dotenv(project_env)  # Won't override already-set vars
 
     args = parse_args(argv)
     json_mode = args.output == "json"
     setup_logging(json_mode)
+
+    # Setup mode — interactive credential configuration
+    if args.setup:
+        run_setup()
+        return
 
     config = build_config(args)
     session = create_session()
@@ -399,8 +544,34 @@ def main(argv=None):
             print(json.dumps({"success": True, "message": "Authenticated successfully."}))
         return
 
+    # Cart view mode
+    if args.cart:
+        try:
+            access_token = token_mgr.get_access_token()
+            cart_items = api.get_cart(session, access_token, config["api_base"])
+            if json_mode:
+                print_cart_json(cart_items)
+            else:
+                print_cart_text(cart_items)
+        except requests.exceptions.ConnectionError:
+            _handle_connection_error(json_mode)
+        except Exception as e:
+            if json_mode:
+                print(json.dumps({"success": False, "error": str(e)}))
+                sys.exit(1)
+            else:
+                print(f"\n❌ Error: {e}")
+                raise
+        return
+
     # Load items
-    items = load_items(args)
+    try:
+        items = load_items(args)
+    except ValueError as e:
+        print(f"Error: {e}\n", file=sys.stderr)
+        if json_mode:
+            print(json.dumps({"success": False, "error": str(e)}))
+        sys.exit(1)
 
     if not items:
         print("Error: No items provided.\n", file=sys.stderr)
@@ -434,6 +605,8 @@ def main(argv=None):
         else:
             print_text_summary(added, not_found, args.modality, dry_run, deals_mode)
 
+    except requests.exceptions.ConnectionError:
+        _handle_connection_error(json_mode)
     except Exception as e:
         if json_mode:
             print(json.dumps({"success": False, "error": str(e)}))
@@ -441,3 +614,13 @@ def main(argv=None):
         else:
             print(f"\n❌ Error: {e}")
             raise
+
+
+def _handle_connection_error(json_mode: bool):
+    """Handle network connection errors with a user-friendly message."""
+    msg = "Network error: could not connect to the Kroger API. Check your internet connection."
+    if json_mode:
+        print(json.dumps({"success": False, "error": msg}))
+    else:
+        print(f"\n❌ {msg}")
+    sys.exit(1)

@@ -250,18 +250,28 @@ class TokenManager:
             "code_challenge_method": "S256",
         }
 
-        # Start local callback server with dynamic port to avoid conflicts
+        parsed_redirect = urlparse(self.redirect_uri)
+        callback_host = parsed_redirect.hostname
+        callback_port = parsed_redirect.port
+        if not callback_host or callback_port is None:
+            raise ValueError(
+                "Invalid redirect URI configuration. Set KROGER_REDIRECT_URI to a full URI "
+                "with an explicit host and port, e.g. http://localhost:3000."
+            )
+
+        # Start callback server on the exact configured redirect URI port.
+        # OAuth providers require an exact redirect URI match with app settings.
         class ReusableTCPServer(HTTPServer):
             allow_reuse_address = True
 
         try:
-            server = ReusableTCPServer(("localhost", 0), OAuthCallbackHandler)
-        except OSError:
-            server = ReusableTCPServer(("localhost", 3000), OAuthCallbackHandler)
-
-        actual_port = server.server_address[1]
-        self.redirect_uri = f"http://localhost:{actual_port}"
-        auth_params["redirect_uri"] = self.redirect_uri
+            server = ReusableTCPServer((callback_host, callback_port), OAuthCallbackHandler)
+        except OSError as e:
+            raise RuntimeError(
+                f"OAuth callback server could not bind to {callback_host}:{callback_port}. "
+                "Use a free port or update KROGER_REDIRECT_URI and your Kroger app Redirect URI "
+                "to the same exact value."
+            ) from e
 
         auth_url = f"{self.auth_url}?{urlencode(auth_params)}"
 
@@ -272,7 +282,7 @@ class TokenManager:
         server.auth_code = None
         server.auth_error = None
 
-        logger.info(f"Waiting for authentication on port {actual_port}...")
+        logger.info(f"Waiting for authentication on {callback_host}:{callback_port}...")
         while server.auth_code is None and server.auth_error is None:
             server.handle_request()
 
